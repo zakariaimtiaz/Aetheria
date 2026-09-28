@@ -1,0 +1,25 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/admin :: adminHead(${appName} + ' — Sign in')}"></head>
+<body>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="width:400px;max-width:100%;margin:0">
+        <div class="card-head" style="justify-content:center">
+            <span>🤖 <span th:text="${appName}">App</span> — Admin</span>
+        </div>
+        <div class="card-body">
+            <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
+
+            <form th:action="@{/admin/login}" method="post" autocomplete="off">
+                <input type="password" name="key" id="keyInput" placeholder="SECRET KEY"
+                       inputmode="numeric" pattern="[0-9]{8}" maxlength="8" required autofocus>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+                    <a class="btn" th:href="@{/}">Cancel</a>
+                    <button type="submit" class="btn btn-primary">Sign in</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

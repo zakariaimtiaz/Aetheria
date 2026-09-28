@@ -1,0 +1,407 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/admin :: adminHead(${appName} + ' — Document Tools')}"></head>
+<body>
+<div class="layout">
+    <div th:insert="~{fragments/admin :: adminMenu('documents')}"></div>
+
+    <main class="content">
+        <div class="topbar">
+            <div>
+                <h1>Document Tools</h1>
+                <p class="subtitle">Convert, upload and index documents for the knowledge base.</p>
+            </div>
+        </div>
+
+        <div class="page">
+            <div id="globalAlert" style="display:none"></div>
+
+            <div class="grid-2">
+                <!-- Converter -->
+                <div class="card">
+                    <div class="card-head">Convert & Upload</div>
+                    <div class="card-body">
+                        <p class="hint">Converts PDF, DOCX, PPTX to markdown with MarkItDown and saves the result to the docs directory.</p>
+                        <form id="convertForm" th:action="@{/admin/documents/convert}" method="post" enctype="multipart/form-data">
+                            <div class="file-area" onclick="document.getElementById('filePicker').click()">
+                                <input type="file" id="filePicker" name="file" required>
+                                <div class="file-label">Click to select a file (PDF, DOCX, PPTX)</div>
+                            </div>
+                            <div style="margin-top:16px; text-align:right">
+                                <button type="submit" class="btn btn-primary">Convert &amp; Save</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Direct upload -->
+                <div class="card">
+                    <div class="card-head">Upload File Directly</div>
+                    <div class="card-body">
+                        <p class="hint">Skips conversion. Excel sheets are ingested as deterministic tables.</p>
+                        <form id="mdUploadForm" method="post" enctype="multipart/form-data">
+                            <div class="file-area" onclick="document.getElementById('mdFilePicker').click()">
+                                <input type="file" id="mdFilePicker" name="file" accept=".md,.markdown,.xlsx,.xls" required>
+                                <div class="file-label">Click to select a file (.md or .xlsx/.xls)</div>
+                            </div>
+                            <div style="margin-top:16px; text-align:right">
+                                <button type="submit" class="btn btn-primary" id="mdUploadBtn">Save to Directory</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Knowledge base -->
+            <div class="card">
+                <div class="card-head">Knowledge Base</div>
+                <div class="card-body">
+                    <p class="hint">After converting documents, push them into the database so the AI can use them.</p>
+                    <label class="check-row" style="margin-bottom:14px">
+                        <input type="checkbox" id="forceReindex">
+                        <span><b>Force full re-embed</b> &mdash; re-embeds every .md, .xlsx and .xls file, ignoring
+                            content hashes. Use after changing the chunker, the noise stripper or the embedding model.
+                            A normal rebuild only picks up files whose <i>content</i> changed.</span>
+                    </label>
+                    <button id="ingestBtn" class="btn btn-primary" onclick="runIngestion()">Rebuild Knowledge Base</button>
+                </div>
+            </div>
+
+            <!-- Provider & model -->
+            <div class="card">
+                <div class="card-head">
+                    <span>Provider &amp; Model</span>
+                    <span class="card-head-note">Takes effect immediately</span>
+                </div>
+                <div class="card-body">
+                    <p class="hint">Switch the AI provider used for chat responses.</p>
+                    <div id="providerStatus" class="hint"></div>
+                    <div id="providerList" style="display:flex; gap:12px; flex-wrap:wrap"></div>
+                </div>
+            </div>
+
+            <!-- Chat display -->
+            <div class="card">
+                <div class="card-head">Chat Display</div>
+                <div class="card-body">
+                    <p class="hint">Control whether answers show source badges. Takes effect immediately.</p>
+                    <label class="check-row">
+                        <input type="checkbox" id="referencesToggle" onchange="saveDisplay()">
+                        <span>Show source references under answers</span>
+                    </label>
+                    <div id="displayStatus" class="status-line"></div>
+                </div>
+            </div>
+
+            <!-- Diagnostics -->
+            <div class="card">
+                <div class="card-head">Retrieval Diagnostics</div>
+                <div class="card-body">
+                    <p class="hint">Corpus size and vector-index health. The <code>ivfflat.probes</code> value is the
+                        critical one &mdash; if it is <code>1</code>, searches can only see a fraction of the corpus.</p>
+                    <button class="btn" onclick="loadDiagnostics()">Run Diagnostics</button>
+                    <pre id="diagOut" style="display:none"></pre>
+                </div>
+            </div>
+
+            <!-- Setup instructions -->
+            <div class="card">
+                <div class="card-head">Setup Instructions</div>
+                <div class="card-body">
+                    <div class="grid-3">
+                        <div class="doc-section">
+                            <h3>1. Install Python 3.10+</h3>
+                            <p><strong>Windows:</strong> Download from python.org, check <code>Add python.exe to PATH</code></p>
+                            <pre><code>python --version
+pip --version</code></pre>
+                            <p><strong>Linux:</strong></p>
+                            <pre><code>sudo apt update
+sudo apt install python3 python3-pip python3-venv git -y</code></pre>
+                        </div>
+                        <div class="doc-section">
+                            <h3>2. Install markitdown</h3>
+                            <pre><code>pip install -e "packages/markitdown[all]"</code></pre>
+                        </div>
+                        <div class="doc-section">
+                            <h3>3. Verify</h3>
+                            <pre><code>markitdown --version</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<div id="toast" class="toast"></div>
+<script th:replace="~{fragments/admin :: adminScripts}"></script>
+
+<script>
+    // Provider management
+    async function loadProviders() {
+        try {
+            const r = await fetch(ADMIN_API + '/provider');
+            if (handleAdminError(r) || !r.ok) return;
+            renderProviders(await r.json());
+        } catch (e) {
+            console.error('Failed to load providers:', e);
+        }
+    }
+
+    function renderProviders(data) {
+        const statusEl = document.getElementById('providerStatus');
+        const listEl = document.getElementById('providerList');
+        if (!statusEl || !listEl) return;
+
+        statusEl.textContent = 'Current: ' + data.providers[data.current].name
+            + ' — ' + data.currentModel;
+
+        listEl.innerHTML = '';
+        for (const [key, info] of Object.entries(data.providers)) {
+            const isActive = key === data.current;
+            const isAvailable = info.available;
+
+            const card = document.createElement('div');
+            card.style.cssText = 'border: 2px solid ' + (isActive ? '#4a90d9' : '#e0e0e0')
+                + '; border-radius: 8px; padding: 14px 18px; min-width: 200px;'
+                + ' cursor: ' + (isAvailable && !isActive ? 'pointer' : 'default')
+                + '; opacity: ' + (isAvailable ? '1' : '0.5')
+                + '; transition: all 0.2s; background: ' + (isActive ? '#f0f7ff' : '#fff') + ';';
+
+            let html = '<div style="font-weight:600;margin-bottom:4px">' + info.name + '</div>';
+
+            if (isActive) {
+                html += '<div style="display:flex;align-items:center;gap:4px;margin-top:6px">'
+                    + '<input id="modelInput" type="text" value="' + escapeHtml(info.model) + '" '
+                    + 'style="flex:1;font-size:0.82em;font-family:monospace;padding:4px 6px;border:1px solid #ccc;border-radius:4px" '
+                    + 'placeholder="Model name">'
+                    + '<button onclick="applyModel(\'' + key + '\')" title="Apply" '
+                    + 'style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:2px 4px;opacity:0.6" '
+                    + 'onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">✅</button>'
+                    + '</div>';
+                if (info.model !== info.defaultModel) {
+                    html += '<div style="font-size:0.75em;color:#999;margin-top:4px">Default: <code>'
+                        + escapeHtml(info.defaultModel) + '</code></div>';
+                }
+            } else {
+                html += '<div style="font-size:0.82em;color:#666;font-family:monospace">'
+                    + escapeHtml(info.model) + '</div>';
+            }
+
+            html += '<div style="font-size:0.78em;margin-top:6px;color:'
+                + (isAvailable ? (isActive ? '#4a90d9' : '#5cb85c') : '#999') + '">'
+                + (isActive ? 'Active'
+                    : (isAvailable ? 'Available — click to switch' : 'API key not set'))
+                + '</div>';
+
+            card.innerHTML = html;
+
+            if (isAvailable && !isActive) {
+                card.onmouseenter = () => { card.style.borderColor = '#4a90d9'; };
+                card.onmouseleave = () => { card.style.borderColor = '#e0e0e0'; };
+                card.onclick = () => switchProvider(key);
+            }
+            listEl.appendChild(card);
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    async function applyModel(provider) {
+        const input = document.getElementById('modelInput');
+        const model = input.value.trim();
+        if (!model) return;
+        try {
+            const r = await fetch(ADMIN_API + '/provider/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider, model: model })
+            });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            if (r.ok) {
+                renderProviders(data);
+                showAlert('Model updated to <code>' + escapeHtml(model) + '</code>', 'success');
+            } else {
+                showAlert(data.error || 'Failed to update model', 'danger');
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    async function switchProvider(provider) {
+        try {
+            const r = await fetch(ADMIN_API + '/provider', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider })
+            });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            if (r.ok) {
+                renderProviders(data);
+                showAlert('Switched to <strong>' + data.providers[provider].name + '</strong> (' + data.currentModel + ')', 'success');
+            } else {
+                showAlert(data.error || 'Failed to switch provider', 'danger');
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    // Chat display
+    async function loadDisplay() {
+        const toggle = document.getElementById('referencesToggle');
+        const status = document.getElementById('displayStatus');
+        try {
+            const r = await fetch(CTX + 'admin/documents/api/display');
+            if (handleAdminError(r) || !r.ok) return;
+            const data = await r.json();
+            toggle.checked = !!data.referencesEnabled;
+            if (status) {
+                status.textContent = 'Current: ' + (data.referencesEnabled ? 'ON' : 'OFF')
+                    + (data.source === 'db' ? ' (saved in database)'
+                                            : ' (not set — saving will store it)');
+            }
+        } catch (e) {
+            console.error('Failed to load display settings:', e);
+        }
+    }
+
+    async function saveDisplay() {
+        const toggle = document.getElementById('referencesToggle');
+        const status = document.getElementById('displayStatus');
+        try {
+            const r = await fetch(CTX + 'admin/documents/api/display', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ referencesEnabled: toggle.checked })
+            });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            if (r.ok && data.success) {
+                if (status) status.textContent = 'Current: ' + (data.referencesEnabled ? 'ON' : 'OFF') + ' (saved in database)';
+                showAlert('Source references <strong>' + (data.referencesEnabled ? 'enabled' : 'disabled') + '</strong>', 'success');
+            } else {
+                showAlert(data.message || 'Failed to save display setting', 'danger');
+                loadDisplay();
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+            loadDisplay();
+        }
+    }
+
+    // Diagnostics
+    async function loadDiagnostics() {
+        const out = document.getElementById('diagOut');
+        out.style.display = 'block';
+        out.textContent = 'Running...';
+        try {
+            const r = await fetch(CTX + 'admin/documents/api/diagnostics/retrieval');
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            out.textContent = JSON.stringify(data, null, 2);
+            const corpus = data.corpus || {};
+            const index = data.index || {};
+            if (corpus.error || index.error) {
+                showAlert('Diagnostics returned an error (see output).', 'danger');
+            } else if (index.ivfflatSearchIsExact === false) {
+                showAlert('WARNING: ivfflat.probes is below the index list count, so searches are missing chunks. Set vector.store.ivfflat-probes ≥ ' + (index.ivfflatLists || '?') + '.', 'danger');
+            } else if (corpus.chunksOver2000Chars > 0) {
+                showAlert('Corpus looks healthy, but ' + corpus.chunksOver2000Chars + ' chunk(s) exceed the BGE token limit. Re-index to fix.', 'danger');
+            } else {
+                showAlert('Diagnostics OK — ' + corpus.chunks + ' chunks, probes=' + index.configuredProbes + ' (exact=' + index.ivfflatSearchIsExact + ')', 'success');
+            }
+        } catch (e) {
+            out.textContent = 'Error: ' + e.message;
+        }
+    }
+
+    // Convert form
+    document.getElementById('convertForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const btn = this.querySelector('button[type="submit"]');
+        const fileInput = document.getElementById('filePicker');
+        if (!fileInput.files.length) { showAlert('Please select a file.', 'danger'); return; }
+
+        btn.disabled = true;
+        btn.textContent = 'Converting...';
+        try {
+            const r = await fetch(CTX + 'admin/documents/convert', { method: 'POST', body: new FormData(this) });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            showAlert(data.message, data.success ? 'success' : 'danger');
+            if (data.success) fileInput.value = '';
+        } catch (err) {
+            showAlert('Error: ' + err.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Convert & Save';
+        }
+    });
+
+    // Direct upload form
+    document.getElementById('mdUploadForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const btn = document.getElementById('mdUploadBtn');
+        const fileInput = document.getElementById('mdFilePicker');
+        if (!fileInput.files.length) { showAlert('Please select a file (.md or .xlsx/.xls).', 'danger'); return; }
+
+        btn.disabled = true;
+        btn.textContent = 'Uploading...';
+        try {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            const r = await fetch(CTX + 'admin/documents/upload-md', { method: 'POST', body: formData });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            showAlert(data.message, data.success ? 'success' : 'danger');
+            if (data.success) fileInput.value = '';
+        } catch (err) {
+            showAlert('Error: ' + err.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Save to Directory';
+        }
+    });
+
+    // Ingestion
+    async function runIngestion() {
+        const btn = document.getElementById('ingestBtn');
+        const force = document.getElementById('forceReindex').checked;
+        if (force && !confirm(
+            'Force full re-embed?\n\n'
+            + 'Every .md, .xlsx and .xls file will be re-cleaned, re-split and re-embedded, '
+            + 'ignoring content hashes. This runs synchronously and can take several minutes '
+            + 'on a large knowledge base.\n\nContinue?')) {
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
+        try {
+            const r = await fetch(CTX + 'admin/documents/ingest?force=' + force, { method: 'POST' });
+            if (handleAdminError(r)) return;
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            showAlert(data.message, data.success ? 'success' : 'danger');
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Rebuild Knowledge Base';
+        }
+    }
+
+    window.addEventListener('load', () => {
+        loadProviders();
+        loadDisplay();
+    });
+</script>
+</body>
+</html>

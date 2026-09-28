@@ -1,0 +1,115 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<!--
+  Admin panel shell fragments.
+
+  Pages pull in `adminHead` (meta + admin.css) and `adminMenu` (sidebar), so
+  the menu, logout and page furniture are defined once.
+-->
+<head th:fragment="adminHead(title)">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title th:text="${title}">Admin</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <link rel="stylesheet" th:href="@{/css/admin.css}">
+    <!--
+      The app runs under a context path (/fshipbotx). Every admin fetch must be
+      built from this value, so it is published to the DOM as a data attribute
+      rather than inlined into JS: Thymeleaf's /*[[@{...}]]*/ form needs
+      th:inline="javascript" on the exact element, and when it is missing the
+      expression is left as a JS comment and the fallback literal silently wins.
+    -->
+    <meta name="admin-ctx" th:content="@{/}">
+</head>
+
+<!-- Insert (not replace) inside a page's own <div class="layout"> wrapper. -->
+<aside class="sidebar" th:fragment="adminMenu(active)">
+        <div class="brand">
+        <span class="brand-mark">🤖</span>
+            <div>
+                <div class="brand-text" th:text="${appName}">App</div>
+                <div class="brand-sub">Admin Panel</div>
+            </div>
+    </div>
+
+    <nav class="menu">
+        <div class="menu-label">Content</div>
+        <a class="menu-item" th:classappend="${active == 'prompts'} ? 'active'"
+           th:href="@{/admin/prompts}">
+            <span class="menu-icon">📝</span> Prompts
+        </a>
+        <a class="menu-item" th:classappend="${active == 'settings'} ? 'active'"
+           th:href="@{/admin/settings}">
+            <span class="menu-icon">⚙️</span> App Settings
+        </a>
+        <a class="menu-item" th:classappend="${active == 'documents'} ? 'active'"
+           th:href="@{/admin/documents}">
+            <span class="menu-icon">📄</span> Document Tools
+        </a>
+    </nav>
+
+    <div class="sidebar-foot">
+        <button class="logout-btn" onclick="adminLogout()">
+            <span>↩</span> Sign out
+        </button>
+    </div>
+</aside>
+
+<script th:fragment="adminScripts">
+    // Read from the meta tag rendered by the adminHead fragment. Always ends with
+    // a trailing slash, so simple concatenation yields correct URLs under any
+    // context path.
+    const CTX = (document.querySelector('meta[name="admin-ctx"]').content || '/').replace(/\/?$/, '/');
+    const ADMIN_API = CTX + 'admin/api';
+
+    function adminLogout() {
+        const done = () => { window.location.href = CTX + 'admin/login'; };
+        fetch(CTX + 'admin/logout', { method: 'POST' })
+            .then(done)
+            .catch(done);
+    }
+
+    function toast(message, ok) {
+        const t = document.getElementById('toast');
+        if (!t) return;
+        t.textContent = message;
+        t.className = 'toast ' + (ok ? 'ok' : 'err') + ' show';
+        setTimeout(() => { t.className = 'toast'; }, 2500);
+    }
+
+    function showAlert(msg, type) {
+        let el = document.getElementById('globalAlert');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'globalAlert';
+            el.style.marginBottom = '16px';
+            const anchor = document.querySelector('.page') || document.body;
+            anchor.insertBefore(el, anchor.firstChild);
+        }
+        el.style.display = 'block';
+        el.className = 'alert alert-' + type;
+        el.innerHTML = '<button class="alert-close" onclick="dismissAlert()">&times;</button>' + msg;
+        clearTimeout(el._timer);
+        el._timer = setTimeout(() => { el.style.display = 'none'; }, 6000);
+    }
+
+    function dismissAlert() {
+        const el = document.getElementById('globalAlert');
+        if (el) el.style.display = 'none';
+    }
+
+    // A 401 from the interceptor means the session grant expired: send the
+    // admin back to the login page instead of showing a parse error.
+    function handleAdminError(response, fallbackMessage) {
+        if (response.status === 401) {
+            window.location.href = CTX + 'admin/login';
+            return true;
+        }
+        return false;
+    }
+</script>
+</body>
+</html>

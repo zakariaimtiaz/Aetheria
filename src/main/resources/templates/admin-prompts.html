@@ -1,0 +1,275 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/admin :: adminHead(${appName} + ' — Prompts')}"></head>
+<body>
+<div class="layout">
+    <div th:insert="~{fragments/admin :: adminMenu('prompts')}"></div>
+
+    <main class="content">
+        <div class="topbar">
+            <div>
+                <h1>Prompts</h1>
+                <p class="subtitle">
+                    Every LLM prompt the bot uses. Saving writes to the database and takes effect
+                    on the next question &mdash; no restart.
+                </p>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-xs" onclick="checkAgain()">Check again</button>
+            </div>
+        </div>
+
+        <div class="page">
+            <div id="globalAlert" style="display:none"></div>
+
+            <div class="alert alert-danger" th:if="${!promptsDbBacked}">
+                <b>Prompts are not editable right now.</b>
+                <span th:text="${promptsUnavailableReason}">Run the database scripts.</span>
+                <br>
+                <span>The bot is currently using the built-in defaults, so it still answers normally &mdash;
+                    but anything you type here cannot be saved until the scripts have been run.</span>
+            </div>
+
+            <div class="alert alert-info" th:if="${promptsDbBacked}">
+                <span><b th:text="${promptCount}">0</b> prompts defined and stored in the database.
+                    Placeholders like <code>{context}</code> are replaced at request time &mdash; keep them intact
+                    or the model loses the retrieved text.</span>
+            </div>
+
+            <div th:each="section : ${promptSections}" class="prompt-section"
+                 th:attr="data-group=${section.id}">
+                <div class="prompt-section-head">
+                    <h2 th:text="${section.title}">Group</h2>
+                    <p th:text="${section.description}">Description</p>
+                </div>
+
+                <div class="prompt-grid">
+                    <div class="prompt-card" th:each="p : ${section.prompts}"
+                         th:attr="data-key=${p.key}, data-customized=${p.customized}">
+
+                        <div class="prompt-card-top">
+                            <span class="prompt-label" th:text="${p.label}">Label</span>
+                            <span class="badge badge-custom" th:if="${p.customized}">edited</span>
+                        </div>
+
+                        <code class="prompt-key" th:text="${p.key}">prompt.x</code>
+                        <p class="prompt-desc" th:text="${p.description}">Description</p>
+
+                        <pre class="prompt-preview" th:text="${#strings.abbreviate(p.content, 220)}">preview</pre>
+
+                        <div class="prompt-card-meta">
+                            <span th:if="${!p.placeholders.isEmpty()}"
+                                  th:text="'Uses ' + ${#strings.listJoin(p.placeholders, ' ')}">placeholders</span>
+                            <span th:if="${p.updatedAt != null}"
+                                  th:text="'Updated ' + ${#temporals.format(p.updatedAt, 'MMM d, HH:mm')}">updated</span>
+                        </div>
+
+                        <div class="prompt-card-actions">
+                            <button class="btn btn-primary btn-xs"
+                                    th:attr="data-key=${p.key}" onclick="openEditor(this)">Edit</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Editor modal -->
+<div class="modal-overlay" id="editorOverlay">
+    <div class="modal modal-lg">
+        <div class="modal-head">
+            <div>
+                <span id="editorTitle">Edit prompt</span>
+                <div class="modal-sub"><code id="editorKey">prompt.x</code></div>
+            </div>
+            <button class="close" onclick="closeEditor()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="hint" id="editorDesc"></p>
+            <div class="field">
+                <label>Prompt text</label>
+                <textarea id="editorText" rows="20" spellcheck="false"></textarea>
+            </div>
+            <div class="editor-foot">
+                <span class="prompt-meta" id="editorStats"></span>
+                <span class="spacer"></span>
+                <span class="prompt-meta">Tip: <code>Ctrl</code>+<code>Enter</code> saves</span>
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn" onclick="closeEditor()">Cancel</button>
+            <button class="btn btn-primary" id="editorSaveBtn" onclick="savePrompt()">Save</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script th:replace="~{fragments/admin :: adminScripts}"></script>
+
+<script>
+    // ---- Prompt text, keyed by prompt key ----
+    // Loaded from the API rather than inlined into the page: the text is long,
+    // HTML-escaping it into a <pre> is lossy for whitespace, and the editor needs
+    // the exact bytes that will be sent to the model.
+    const PROMPTS = {};
+
+    let ACTIVE_KEY = null;
+
+    async function loadPrompts() {
+        try {
+            const r = await fetch(ADMIN_API + '/prompts', { headers: { 'Accept': 'application/json' } });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            for (const p of data.prompts) {
+                PROMPTS[p.key] = p;
+            }
+        } catch (e) {
+            showAlert('Could not load prompts: ' + e.message, 'danger');
+        }
+    }
+
+    // ---- Editor ----
+
+    function openEditor(btn) {
+        const key = btn.dataset.key;
+        const p = PROMPTS[key];
+        if (!p) {
+            showAlert('Prompt text is still loading, try again in a moment.', 'danger');
+            return;
+        }
+        ACTIVE_KEY = key;
+        document.getElementById('editorTitle').textContent = p.label;
+        document.getElementById('editorKey').textContent = key;
+        document.getElementById('editorDesc').textContent = p.description || '';
+        const text = document.getElementById('editorText');
+        text.value = p.content;
+        updateStats();
+        document.getElementById('editorOverlay').classList.add('active');
+        text.focus();
+    }
+
+    function closeEditor() {
+        document.getElementById('editorOverlay').classList.remove('active');
+        ACTIVE_KEY = null;
+    }
+
+    function editorIsOpen() {
+        return document.getElementById('editorOverlay').classList.contains('active');
+    }
+
+    document.getElementById('editorOverlay').addEventListener('click', function (e) {
+        if (e.target === this) closeEditor();
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && editorIsOpen()) {
+            closeEditor();
+        }
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && editorIsOpen()) {
+            e.preventDefault();
+            savePrompt();
+        }
+    });
+
+    function updateStats() {
+        const text = document.getElementById('editorText').value;
+        const lines = text ? text.split('\n').length : 0;
+        const p = PROMPTS[ACTIVE_KEY];
+        const missing = ((p && p.placeholders) || []).filter(function (ph) {
+            return text.indexOf(ph) === -1;
+        });
+        let stats = text.length + ' characters, ' + lines + ' lines';
+        if (missing.length) {
+            stats += ' — missing ' + missing.join(' ');
+        }
+        document.getElementById('editorStats').textContent = stats;
+    }
+
+    document.getElementById('editorText').addEventListener('input', updateStats);
+
+    // ---- Save: persists to the database and applies immediately ----
+
+    async function savePrompt() {
+        if (!ACTIVE_KEY) return;
+        const key = ACTIVE_KEY;
+        const content = document.getElementById('editorText').value;
+        const btn = document.getElementById('editorSaveBtn');
+
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+            const r = await fetch(ADMIN_API + '/prompts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: key, content: content })
+            });
+            if (handleAdminError(r)) return;
+            const data = await r.json().catch(() => ({}));
+            if (r.ok) {
+                // The response is the row as persisted, so the grid and the cache
+                // both reflect exactly what is now in the database.
+                PROMPTS[key] = data;
+                markCustomized(key, data);
+                closeEditor();
+                showAlert('Saved <code>' + key + '</code> to the database — in effect on the next question.', 'success');
+            } else {
+                showAlert(data.error || 'Failed to save prompt', 'danger');
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
+    }
+
+    // Reflect a save in the grid without reloading the page.
+    function markCustomized(key, saved) {
+        const card = document.querySelector('.prompt-card[data-key="' + key + '"]');
+        if (!card) return;
+        card.dataset.customized = 'true';
+
+        const preview = card.querySelector('.prompt-preview');
+        if (preview && saved) preview.textContent = abbreviate(saved.content, 220);
+
+        if (!card.querySelector('.badge-custom')) {
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-custom';
+            badge.textContent = 'edited';
+            card.querySelector('.prompt-card-top').appendChild(badge);
+        }
+    }
+
+    function abbreviate(text, max) {
+        if (!text) return '';
+        return text.length > max ? text.substring(0, max) + '…' : text;
+    }
+
+    // ---- Re-check the database ----
+    // A read, not a write: after running schema.sql / data.sql this picks the
+    // edits up without a redeploy. Kept off the cards so Edit stays the only
+    // per-prompt control.
+
+    async function checkAgain() {
+        try {
+            const r = await fetch(ADMIN_API + '/prompts/reload', { method: 'POST' });
+            if (handleAdminError(r)) return;
+            const data = await r.json();
+            if (r.ok && data.dbBacked) {
+                toast('Database is ready — prompts are editable', true);
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                showAlert(data.unavailableReason
+                    ? 'Still not editable: ' + data.unavailableReason
+                    : 'Still not editable.', 'danger');
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    loadPrompts();
+</script>
+</body>
+</html>

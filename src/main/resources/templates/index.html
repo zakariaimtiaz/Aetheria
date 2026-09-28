@@ -1,0 +1,479 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>... .. .</title>
+    <!-- 🤖 Robot Favicon -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>"
+    />
+    <link
+      rel="shortcut icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>"
+    />
+    <!-- External CSS -->
+    <link rel="stylesheet" th:href="@{/css/style.css}" />
+    <link rel="stylesheet" th:href="@{/css/robot.css}" />
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header with Robot - Centered Profile -->
+      <div class="header">
+        <!-- Robot Eyes at Top Right -->
+        <div class="robot-eyes-container" id="robotEyes">
+          <div class="robot-eye" id="leftEye">
+            <div class="eye-pupil" id="leftPupil"></div>
+            <div class="eye-lid"></div>
+          </div>
+          <div class="robot-eye" id="rightEye">
+            <div class="eye-pupil" id="rightPupil"></div>
+            <div class="eye-lid"></div>
+          </div>
+        </div>
+
+        <div class="bot-profile">
+          <div class="bot-info">
+            <h1>... .. .</h1>
+            <div class="bot-tagline">... .. .</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Container -->
+      <div class="chat-container">
+        <!-- Conversation Thread -->
+        <div class="conversation-thread" id="conversationThread">
+          <!-- Messages will be added here dynamically -->
+        </div>
+
+        <!-- Input Area -->
+        <div class="conversation-input">
+          <textarea
+            id="questionInput"
+            placeholder="Type your question here ..."
+            rows="1"
+            oninput="
+              this.style.height = '';
+              this.style.height = this.scrollHeight + 'px';
+            "
+          ></textarea>
+          <button type="button" id="submitBtn" onclick="sendMessage()">
+            <span>Send</span>
+            <span>📤</span>
+          </button>
+        </div>
+
+        <!-- DYNAMIC SUGGESTIONS BLOCK -->
+        <div class="suggestions">
+          <div class="suggestions-title">💡 Suggested questions:</div>
+          <div class="suggestion-chips" id="suggestionChipsContainer">
+            <!-- Will be populated from XML -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <p>... .. .</p>
+        <p style="margin-top: 5px; font-size: 0.85em; opacity: 0.8">... .. .</p>
+        <p style="margin-top: 5px; font-size: 0.75em; opacity: 0.8">... .. .</p>
+      </div>
+    </div>
+
+    <script th:inline="javascript">
+      // ===== GET CONTEXT PATH FROM SPRING PROPERTIES =====
+      const contextPath = /*[[@{/}]]*/ "";
+      const API_BASE_URL = contextPath + "api";
+      const APP_CONFIG_URL = contextPath + "app-config.xml";
+
+      // ===== CONVERSATION MEMORY =====
+      let conversationHistory = [];
+      let welcomeMessage = "";
+
+      // Initialize conversation
+      window.addEventListener("load", function () {
+        loadInfoFromXML();
+      });
+
+      // ===== LOAD FROM XML =====
+      async function loadInfoFromXML() {
+        try {
+          const response = await fetch(APP_CONFIG_URL);
+          if (!response.ok) {
+            throw new Error("XML file not found");
+          }
+
+          const xmlText = await response.text();
+          const xmlDoc = new DOMParser().parseFromString(xmlText, "text/xml");
+
+          // 🔹 PAGE TITLE
+          const title = xmlDoc.getElementsByTagName("title")[0]?.textContent;
+          if (title) document.title = title;
+
+          // 🔹 BOT INFO
+          const botName = xmlDoc.getElementsByTagName("name")[0]?.textContent;
+          const tagline =
+            xmlDoc.getElementsByTagName("tagline")[0]?.textContent;
+
+          if (botName)
+            document.querySelector(".bot-info h1").innerText = botName;
+          if (tagline)
+            document.querySelector(".bot-tagline").innerText = tagline;
+
+          // 🔹 WELCOME MESSAGE
+          welcomeMessage =
+            xmlDoc.getElementsByTagName("message")[0]?.textContent;
+
+          if (welcomeMessage) {
+            addMessageToThread(welcomeMessage, "bot", [], false);
+          }
+
+          // 🔹 FOOTER
+          const footer1 = xmlDoc.getElementsByTagName("line1")[0]?.textContent;
+          const footer2 = xmlDoc.getElementsByTagName("line2")[0]?.textContent;
+          const footer3 = xmlDoc.getElementsByTagName("line3")[0]?.textContent;
+
+          if (footer1)
+            document.querySelector(".footer p:nth-child(1)").innerText =
+              footer1;
+          if (footer2)
+            document.querySelector(".footer p:nth-child(2)").innerText =
+              footer2;
+          if (footer3)
+            document.querySelector(".footer p:nth-child(3)").innerText =
+              footer3;
+
+          // Get all suggestion nodes
+          const suggestions = xmlDoc.getElementsByTagName("suggestion");
+          const suggestionsArray = [];
+
+          for (let i = 0; i < suggestions.length; i++) {
+            const captionNode =
+              suggestions[i].getElementsByTagName("caption")[0];
+            const questionNode =
+              suggestions[i].getElementsByTagName("question")[0];
+            const iconNode = suggestions[i].getElementsByTagName("icon")[0];
+
+            if (questionNode) {
+              suggestionsArray.push({
+                caption: captionNode.textContent,
+                question: questionNode.textContent,
+                icon: iconNode ? iconNode.textContent : "💡",
+              });
+            }
+          }
+
+          // Render the suggestions
+          renderSuggestions(suggestionsArray);
+        } catch (error) {
+          console.error("Error loading XML:", error);
+        }
+      }
+
+      function renderSuggestions(suggestions) {
+        const container = document.getElementById("suggestionChipsContainer");
+        container.innerHTML = "";
+
+        suggestions.forEach((sugg) => {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.innerHTML = `${sugg.icon} ${sugg.caption}`;
+          chip.title = sugg.question;
+
+          if (sugg.question.toLowerCase().includes("clear")) {
+            chip.onclick = () => clearConversation();
+          } else {
+            chip.onclick = () => setQuestion(sugg.question);
+          }
+
+          container.appendChild(chip);
+        });
+      }
+
+      function sendMessage() {
+        const questionInput = document.getElementById("questionInput");
+        const question = questionInput.value.trim();
+
+        if (!question) {
+          // showError('Please enter a question');
+          return;
+        }
+
+        if (question.length > 1000) {
+          showError("Question is too long (maximum 1000 characters)");
+          return;
+        }
+
+        // Add user message to conversation
+        addMessageToThread(question, "user");
+
+        // Clear input
+        questionInput.value = "";
+        questionInput.style.height = "auto";
+
+        // Show typing indicator
+        showTypingIndicator();
+
+        // Send to server with history
+        fetchMessage(question);
+      }
+
+      function addMessageToThread(content, sender, sources = [], showCopy = true) {
+        const thread = document.getElementById("conversationThread");
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${sender}`;
+
+        const time = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        if (sender === "bot") {
+          // For bot messages, preserve line breaks and formatting
+          const formattedContent = escapeHtml(content).replace(/\n/g, "<br>");
+          const formattedSources = formatSources(sources);
+          // Copy button depends on answer text, NOT on sources — hiding References
+          // (app.references.enabled = false in app_setting) must not remove it.
+          // The welcome message opts out via showCopy=false at its call sites.
+          const showCopyBtn = showCopy && content != null && String(content).trim().length > 0;
+          messageDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    <div class="message-text">${formattedContent}</div>
+                    ${formattedSources}
+                    <div class="message-footer">
+                        <span class="message-time">${time}</span>
+                        ${showCopyBtn ? '<button class="copy-icon-btn" onclick="copyAnswer(this)" title="Copy">📋</button>' : ''}
+                    </div>
+                </div>
+            `;
+        } else {
+          // For user messages, escape HTML
+          const escapedContent = escapeHtml(content).replace(/\n/g, "<br>");
+          messageDiv.innerHTML = `
+                <div class="message-avatar">👤</div>
+                <div class="message-content">
+                    <div>${escapedContent}</div>
+                    <div class="message-time">${time}</div>
+                </div>
+            `;
+        }
+
+        thread.appendChild(messageDiv);
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      // Helper function to escape HTML special characters
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function formatSources(sources) {
+        if (!Array.isArray(sources) || sources.length === 0) {
+          return "";
+        }
+
+        const names = sources
+          .map((source) => source && source.documentName)
+          .filter(Boolean)
+          .filter((name, index, allNames) => allNames.indexOf(name) === index)
+          .slice(0, 5)
+          .map(escapeHtml);
+
+        if (names.length === 0) {
+          return "";
+        }
+
+        return `<div class="reference"><strong>References:</strong> ${names.join(", ")}</div>`;
+      }
+
+      function showTypingIndicator() {
+        const thread = document.getElementById("conversationThread");
+        const typingDiv = document.createElement("div");
+        typingDiv.className = "message bot";
+        typingDiv.id = "typingIndicator";
+        typingDiv.innerHTML = `
+            <div class="message-avatar">🤖</div>
+            <div class="message-content">
+                <div class="typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+        `;
+        thread.appendChild(typingDiv);
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      function removeTypingIndicator() {
+        const typingIndicator = document.getElementById("typingIndicator");
+        if (typingIndicator) {
+          typingIndicator.remove();
+        }
+      }
+
+      async function fetchMessage(question) {
+        // Client-side timeout: the server now fails fast (~60s LLM timeout),
+        // but a hung proxy/thread must never leave the spinner forever.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 90000);
+        try {
+          const response = await fetch(API_BASE_URL + "/ask", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+              question: question,
+              includeSources: true,
+            }),
+          });
+
+          if (!response.ok) {
+            if (response.status === 404) {
+              throw new Error(
+                "API endpoint not found. Please check your server configuration.",
+              );
+            }
+            const errorText = await response.text();
+            console.error("Error response:", errorText);
+            throw new Error(`Server returned ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          if (data.error) {
+            throw new Error(data.error);
+          }
+
+          const answer = data.answer || "No answer received";
+          removeTypingIndicator();
+          addMessageToThread(answer, "bot", data.sources);
+        } catch (error) {
+          console.error("Fetch error:", error);
+          removeTypingIndicator();
+          if (error.name === "AbortError") {
+            showError("The request took too long. Please try again in a moment.");
+          } else {
+            showError(error.message || "Failed to get answer. Please try again.");
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      function showError(message) {
+        addMessageToThread("❌ " + message, "bot");
+      }
+
+      function setQuestion(question) {
+        document.getElementById("questionInput").value = question;
+        document.getElementById("questionInput").focus();
+        const textarea = document.getElementById("questionInput");
+        textarea.style.height = "auto";
+        textarea.style.height = textarea.scrollHeight + "px";
+      }
+
+      function clearConversation() {
+        conversationHistory = [];
+        document.getElementById("conversationThread").innerHTML = "";
+        addMessageToThread(welcomeMessage, "bot", [], false);
+      }
+
+      function copyAnswer(btn) {
+        const messageContent = btn.closest('.message-content');
+        const messageText = messageContent.querySelector('.message-text');
+        const text = messageText.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+          btn.textContent = "✅";
+          setTimeout(() => { btn.textContent = "📋"; }, 2000);
+        }).catch(() => {
+          // Fallback for older browsers
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          btn.textContent = "✅";
+          setTimeout(() => { btn.textContent = "📋"; }, 2000);
+        });
+      }
+
+      // Handle Enter key
+      const textarea = document.getElementById("questionInput");
+      textarea.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // Auto-resize textarea
+      textarea.addEventListener("input", function () {
+        this.style.height = "auto";
+        this.style.height = this.scrollHeight + "px";
+      });
+
+      // Robot Eyes Tracking
+      document.addEventListener("mousemove", function (e) {
+        const leftPupil = document.getElementById("leftPupil");
+        const rightPupil = document.getElementById("rightPupil");
+        const leftEye = document.getElementById("leftEye");
+        const rightEye = document.getElementById("rightEye");
+
+        if (leftPupil && rightPupil) {
+          moveEye(leftPupil, leftEye, e, 8);
+          moveEye(rightPupil, rightEye, e, 8);
+        }
+      });
+
+      function moveEye(pupil, eyeContainer, mouseEvent, maxMove) {
+        if (!pupil || !eyeContainer) return;
+
+        const rect = eyeContainer.getBoundingClientRect();
+        const eyeCenterX = rect.left + rect.width / 2;
+        const eyeCenterY = rect.top + rect.height / 2;
+
+        const deltaX = mouseEvent.clientX - eyeCenterX;
+        const deltaY = mouseEvent.clientY - eyeCenterY;
+        const distance = Math.min(
+          Math.sqrt(deltaX * deltaX + deltaY * deltaY) / 20,
+          maxMove,
+        );
+        const angle = Math.atan2(deltaY, deltaX);
+
+        const moveX = Math.cos(angle) * distance;
+        const moveY = Math.sin(angle) * distance;
+
+        pupil.style.transform = `translate(${moveX}px, ${moveY}px)`;
+      }
+
+      // Random blinking
+      setInterval(() => {
+        const leftEye = document.getElementById("leftEye");
+        const rightEye = document.getElementById("rightEye");
+
+        if (leftEye && rightEye) {
+          leftEye.classList.add("blink");
+          rightEye.classList.add("blink");
+
+          setTimeout(() => {
+            leftEye.classList.remove("blink");
+            rightEye.classList.remove("blink");
+          }, 200);
+        }
+      }, 3000);
+
+      // Admin panel is reached directly at /admin/login (date key). The chat
+      // page intentionally has no link to it.
+    </script>
+  </body>
+</html>

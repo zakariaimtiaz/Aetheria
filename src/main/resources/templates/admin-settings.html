@@ -1,0 +1,239 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/admin :: adminHead(${appName} + ' — App Settings')}"></head>
+<body>
+<div class="layout">
+    <div th:insert="~{fragments/admin :: adminMenu('settings')}"></div>
+
+    <main class="content">
+        <div class="topbar">
+            <div>
+                <h1>App Settings</h1>
+                <p class="subtitle">Chat copy, layout values and the suggested questions shown on the chat page.</p>
+            </div>
+        </div>
+
+        <div class="page">
+            <div id="globalAlert" style="display:none"></div>
+
+            <div class="card">
+                <div class="card-head">
+                    <span>Settings</span>
+                    <span class="card-head-note">Saves when you leave a field</span>
+                </div>
+                <div class="card-body">
+                    <table>
+                        <thead><tr><th style="width:40%">Key</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr th:each="s : ${settings}">
+                                <td class="col-key" th:text="${s.configKey}">key</td>
+                                <td>
+                                    <input type="text" class="inline-input" th:value="${s.configValue}"
+                                           th:attr="data-key=${s.configKey}, data-cat=${s.category}"
+                                           onchange="saveSetting(this)">
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <span>Suggested Questions</span>
+                    <button class="btn btn-success btn-xs" onclick="openModal()">+ Add</button>
+                </div>
+                <div class="card-body">
+                    <p class="hint">These appear as clickable chips under the chat input.</p>
+                    <table>
+                        <thead><tr><th style="width:60px">#</th><th>Question</th><th>Status</th><th></th></tr></thead>
+                        <tbody>
+                            <tr th:each="s, iter : ${suggestions}"
+                                th:attr="data-id=${s.id}, data-q=${s.question}, data-c=${s.caption}, data-i=${s.icon}, data-s=${s.sortOrder}">
+                                <td style="text-align:center;white-space:nowrap">
+                                    <div style="font-size:0.82em;color:#999" th:text="${iter.index + 1}">1</div>
+                                    <button class="btn btn-xs" th:attr="data-id=${s.id}, data-dir=-1"
+                                            onclick="reorderSug(this)" title="Move up">&#9650;</button>
+                                    <button class="btn btn-xs" th:attr="data-id=${s.id}, data-dir=1"
+                                            onclick="reorderSug(this)" title="Move down">&#9660;</button>
+                                </td>
+                                <td>
+                                    <div th:text="${s.question}" style="font-size:0.9em;color:#333"></div>
+                                    <div th:text="${s.caption}" style="font-size:0.78em;color:#999;margin-top:2px"></div>
+                                </td>
+                                <td>
+                                    <span class="badge" th:classappend="${s.isActive} ? badge-on : badge-off"
+                                          th:text="${s.isActive} ? 'On' : 'Off'">On</span>
+                                </td>
+                                <td class="col-actions">
+                                    <button class="btn btn-xs" onclick="openModal(this)">Edit</button>
+                                    <button class="btn btn-xs" th:attr="data-id=${s.id}"
+                                            th:text="${s.isActive} ? 'Hide' : 'Show'"
+                                            onclick="toggleSug(this)"></button>
+                                    <button class="btn btn-danger btn-xs" th:attr="data-id=${s.id}"
+                                            onclick="delSug(this)">Delete</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Suggestion modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <div class="modal-head">
+            <span id="modalTitle">Add Suggestion</span>
+            <button class="close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="mId">
+            <div class="field">
+                <label>Question</label>
+                <textarea id="mQ" placeholder="Enter question text"></textarea>
+            </div>
+            <div class="field">
+                <label>Caption</label>
+                <input type="text" id="mC" placeholder="Short caption">
+            </div>
+            <div class="field">
+                <label>Icon</label>
+                <input type="text" id="mI" placeholder="Emoji" style="width:80px">
+            </div>
+            <div class="field" id="sortField" style="display:none">
+                <label>Sort Order</label>
+                <input type="number" id="mS" placeholder="0" style="width:80px" value="0">
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveSug()">Save</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script th:replace="~{fragments/admin :: adminScripts}"></script>
+
+<script>
+    // ---- Settings ----
+
+    async function saveSetting(el) {
+        const key = el.dataset.key, cat = el.dataset.cat, val = el.value;
+        try {
+            const r = await fetch(ADMIN_API + '/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ configKey: key, configValue: val, category: cat })
+            });
+            if (handleAdminError(r)) return;
+            if (r.ok) toast('Saved', true);
+            else {
+                const data = await r.json().catch(() => ({}));
+                showAlert(data.error || 'Failed to save ' + key, 'danger');
+            }
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    // ---- Suggestion modal ----
+
+    function openModal(btn) {
+        const sortField = document.getElementById('sortField');
+        if (btn) {
+            const tr = btn.closest('tr');
+            document.getElementById('modalTitle').textContent = 'Edit Suggestion';
+            document.getElementById('mId').value = tr.dataset.id;
+            document.getElementById('mQ').value = tr.dataset.q;
+            document.getElementById('mC').value = tr.dataset.c;
+            document.getElementById('mI').value = tr.dataset.i;
+            document.getElementById('mS').value = tr.dataset.s || 0;
+            sortField.style.display = 'block';
+        } else {
+            document.getElementById('modalTitle').textContent = 'Add Suggestion';
+            document.getElementById('mId').value = '';
+            document.getElementById('mQ').value = '';
+            document.getElementById('mC').value = '';
+            document.getElementById('mI').value = '';
+            document.getElementById('mS').value = '0';
+            sortField.style.display = 'none';
+        }
+        document.getElementById('modal').classList.add('active');
+        document.getElementById('mQ').focus();
+    }
+
+    function closeModal() {
+        document.getElementById('modal').classList.remove('active');
+    }
+
+    document.getElementById('modal').addEventListener('click', function (e) {
+        if (e.target === this) closeModal();
+    });
+
+    // ---- Suggestions ----
+
+    async function saveSug() {
+        const id = document.getElementById('mId').value;
+        const q = document.getElementById('mQ').value.trim();
+        const c = document.getElementById('mC').value.trim();
+        const i = document.getElementById('mI').value.trim();
+        const s = parseInt(document.getElementById('mS').value) || 0;
+        if (!q) { toast('Question required', false); return; }
+
+        const body = JSON.stringify({ question: q, caption: c, icon: i, sortOrder: s, isActive: true });
+        try {
+            const r = id
+                ? await fetch(ADMIN_API + '/suggestions/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
+                : await fetch(ADMIN_API + '/suggestions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
+            if (handleAdminError(r)) return;
+            if (r.ok) { toast(id ? 'Updated' : 'Added', true); setTimeout(() => window.location.reload(), 400); }
+            else showAlert('Failed to save suggestion', 'danger');
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    async function toggleSug(btn) {
+        try {
+            const r = await fetch(ADMIN_API + '/suggestions/' + btn.dataset.id + '/toggle', { method: 'PUT' });
+            if (handleAdminError(r)) return;
+            if (r.ok) { toast('Updated', true); setTimeout(() => window.location.reload(), 400); }
+            else showAlert('Failed to update', 'danger');
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    async function delSug(btn) {
+        if (!confirm('Delete this suggestion?')) return;
+        try {
+            const r = await fetch(ADMIN_API + '/suggestions/' + btn.dataset.id, { method: 'DELETE' });
+            if (handleAdminError(r)) return;
+            if (r.ok) { toast('Deleted', true); btn.closest('tr').remove(); }
+            else showAlert('Failed to delete', 'danger');
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+
+    async function reorderSug(btn) {
+        try {
+            const r = await fetch(ADMIN_API + '/suggestions/' + btn.dataset.id + '/reorder', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ direction: parseInt(btn.dataset.dir) })
+            });
+            if (handleAdminError(r)) return;
+            if (r.ok) window.location.reload();
+            else showAlert('Failed to reorder', 'danger');
+        } catch (e) {
+            showAlert('Error: ' + e.message, 'danger');
+        }
+    }
+</script>
+</body>
+</html>
