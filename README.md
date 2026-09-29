@@ -15,8 +15,6 @@
 
 Aetheria ingests an organisation's documents — Markdown, Word, PDF, PowerPoint, Excel, and live web pages — embeds them locally, and answers staff questions with citations back to the source passage. Retrieval is hybrid (vector + lexical), results are re-ranked and then checked for grounding before the user ever sees them, and every prompt is editable at runtime from an admin panel without a redeploy.
 
-Originally built for Friendship NGO as `FShipBot`; the Maven artifact is still `com.dis:fshipbot`.
-
 ---
 
 ## Table of Contents
